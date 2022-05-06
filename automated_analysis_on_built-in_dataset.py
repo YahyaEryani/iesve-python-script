@@ -19,7 +19,7 @@ def generate_window(project):
 
             # changing the title of our master widget
             
-            self.master.title("Conduction Gain Data")
+            self.master.title("Automated Energy Analysis")
             self.master.columnconfigure(0, weight=1)
             self.master.rowconfigure(0, weight=1)
             self.master.grid()
@@ -121,14 +121,14 @@ def generate_window(project):
             print('Writing results to Excel Sheet')
 
             # write results data
-            y = 1
+            row = 1
             filename = "../vista/results.aps"
             aps_file = iesve.ResultsReader.open(filename)
             room_ids = aps_file.get_room_ids()
-            sheet1.write_row(y-1, 0, heading)
+            sheet1.write_row(row-1, 0, heading)
             for shape in range(len(room_ids)):
-                sheet1.write_row(y,   0, shape_data[shape])
-                y+=1
+                sheet1.write_row(row,   0, shape_data[shape])
+                row+=1
             
            
             try:
