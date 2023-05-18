@@ -1,16 +1,17 @@
 import iesve
 import tkinter as tk
+from pathlib import Path
 import xlsxwriter
-from operator import itemgetter
 import os
 import numpy as np
 from math import cos, sin, tan
 from tkinter.filedialog import askdirectory
 
-def import_shape(filepath):
-    iesve.ImportGBXML.import_file(filepath, True,iesve.VolumeCapMode.none,0.0)
+def import_building(filepath):
+    print(filepath)
+    iesve.ImportGBXML.import_file(filepath,True,iesve.VolumeCapMode.none,0.0)
  
-def get_conduction_gain():
+def get_conduction_gain(building_name):
     sim = iesve.ApacheSim()
     batch_operation = False
     sim.set_options({'results_filename':'results.aps',
@@ -43,7 +44,7 @@ def get_conduction_gain():
     data=[]
     for id in range(len(room_ids)): 
         room_name = room_names[id][0]
-        room_data=["Conduction gain - external walls & Conduction gain - roof & Conduction gain - ground floor",room_name,"results.aps"]
+        room_data=["Conduction gain",building_name]
         walls_gain = aps_file.get_all_room_results(room_ids[id],'Conduction gain - external wall','z',1,365)['Conduction gain - external walls']
 
         roof_gain  = aps_file.get_all_room_results(room_ids[id],'Conduction gain - roof','z',1,365)['Conduction gain - roofs']                 
@@ -78,92 +79,119 @@ def generate_window(project):
             tk.Frame.__init__(self, master)
             self.project = project
             self.project_folder = project.path
-            self.save_file_name = 'Conduction_Gain_Data'
+            self.save_file_name = 'Conduction_Gain_Results'
             self.master = master
             self.init_window()
 
         # Creation of init_window
         def init_window(self):
-
-            # changing the title of our master widget
-            
-            self.master.title("Conduction Gain Data")
+            """
+            Initializes the window with labels, entry boxes, and buttons.
+            """
+            # Change the title of the main window
+            self.master.title("Conduction Gain Simulation")
             self.master.columnconfigure(0, weight=1)
             self.master.rowconfigure(0, weight=1)
-            self.master.grid()
-            tk.Label(self, text=' ').grid(row=7, sticky=tk.W)
+            # Add this line inside the _init_ method
+            self.imported_body_deleted = tk.BooleanVar()
+            self.imported_body_deleted.set(False)
+            self.imported_body_deleted.trace("w", lambda *args: self.check_body_deleted())
+            empty_label_rows = [7, 11]
+            for row in empty_label_rows:
+                tk.Label(self, text=' ').grid(row=row, sticky=tk.W)
+
             tk.Label(self, text='Conduction Gain Data will be added to an Excel sheet that will be saved into the main project folder').grid(row=8, sticky=tk.W)
             tk.Label(self, text='Name the Excel file below:').grid(row=9, sticky=tk.W)
+
             self.save_file_entry_box = tk.Entry(self)
             self.save_file_entry_box.insert(0, self.save_file_name)
             self.save_file_entry_box.grid(row=10, sticky='ew')
-            tk.Label(self, text=' ').grid(row=11, sticky=tk.W)
-            # creating a button instance
-            tk.Button(self, text="Run Calculation", command=self.run_calc).grid(row=16, sticky=tk.W)
+
+            # Create button
+            run_button = tk.Button(self, text="Run Calculation", command=self.run_process)
+            run_button.grid(row=16, sticky=tk.W)
+
             self.columnconfigure(0, weight=1)
-            self.grid(row=0, column=0, sticky='nsew')
+            self.grid(row=0, column=0, sticky=tk.NSEW)
+            
+        def body_deleted(self):
+            room_count = -1
+            project = iesve.VEProject.get_current_project()
+            models = project.models
+            while room_count != 0:
+                room_count = 0
+                for model in models:
+                    try:
+                        bodies = model.get_bodies_and_ids(False)
+                        for id, body in bodies.items():
+                            # We only want to process thermal rooms here, so filter by type
+                            if body.type == iesve.VEBody_type.room:
+                               body.select()
+                               room_count += 1
+                    except RuntimeError:
+                        room_count = 0
+                        break
+
+                if room_count == 0:
+                    break
+
+            return room_count == 0      
         
-        def run_calc(self):
+        def check_body_deleted(self):
+            if not self.body_deleted():
+               self.master.after(1000, self.check_body_deleted)  # Schedule to check again after 1000 ms (1 second)
+                
+        def close_main_window(self):
+            self.master.withdraw()
+            
+        def run_process(self):
             self.save_file_name = self.save_file_entry_box.get()
             print('Excel File name = \t\t' + self.save_file_name)
-            
             # create excel workbook
             workbook = xlsxwriter.Workbook(self.project_folder + '\\' + self.save_file_name + '.xlsx')
             # create excel work sheet
             sheet1 = workbook.add_worksheet('sheet1')
             
-            def import_move():
-                foldername = askdirectory()
+            def import_delete(self,foldername):
                 data = []
-                for filename in os.listdir(foldername):
-                    f = os.path.join(foldername,filename)
+                filenames = os.listdir(foldername)
+                for filename in filenames:
+                    f = os.path.join(foldername, filename)
                     if os.path.isfile(f):
-                       import_path = f
-                       import_shape(import_path)
-                       data   += get_conduction_gain()
-                       project = iesve.VEProject.get_current_project()
-                       geom    = iesve.VEGeometry
-                       models  = project.models
-                       for model in models:
-                           bodies = model.get_bodies(False) 
-                           for bodyIndex in range(len(bodies)):
-                               surfaces = bodies[bodyIndex].get_surfaces()
-                               for surface in surfaces:
-                                   angle = surface.get_properties()['orientation']
-                                   surface.move((900/tan(20))*sin(angle))
+                        import_path = f
+                        import_building(import_path)
+                        data += get_conduction_gain(os.path.splitext(os.path.basename(filename))[0])
+                        self.check_body_deleted()       
                 return data
+                
             # run main calculation functions
             print('Running Calculations')
-            shape_data = import_move()
-            shape_data = sorted(shape_data, key = itemgetter(4), reverse=True)
-            shape_data = sorted(shape_data, key = itemgetter(3))
-            heading    = ['Var. Name',
-                      'Building Name',
-                       'Filename',
+            foldername = askdirectory()
+            self.close_main_window()
+            buildings_data = import_delete(self,foldername)
+            heading    = [
+                       'Var. Name',
+                       'Building Name',
                        'Max. Val.',
                        'Min. Val.'
-                      ]
+                         ]
 								
             # write data to excel worksheets
             print('Writing results to Excel Sheet')
 
             # write results data
             y = 1
-            filename = "../vista/results.aps"
-            aps_file = iesve.ResultsReader.open(filename)
-            room_ids = aps_file.get_room_ids()
+
             sheet1.write_row(y-1, 0, heading)
-            for shape in range(len(room_ids)):
-                sheet1.write_row(y,   0, shape_data[shape])
+            for buildings_data in buildings_data:
+                sheet1.write_row(y,   0, buildings_data)
                 y+=1
-            
            
             try:
                 workbook.close()
             except PermissionError as e:
                 print("Couldn't close workbook: ", e)
             os.startfile(self.project_folder + '\\' + self.save_file_name + '.xlsx')
-            root.destroy()
 
     root = tk.Tk()
     app = Window(root)
